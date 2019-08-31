@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+config=$HOME/.oclip
+if [ ! -f $config ]; then
+    echo "oclip config file not found in $config"
+    exit 1
+fi
+
+function get_config() {
+    echo $(awk -F "=" '/^'$1'/ {print $2}' $config)
+}
+
+token=$(get_config token)
+passwd=$(get_config passwd)
+domain=$(get_config domain)
+
+if [ "$token"x == "x" ]; then
+    echo "no token in $config"
+    exit 2
+fi
+if [ "$passwd"x == "x" ]; then
+    echo "no passwd in $config"
+    exit 2
+fi
+
+function usage() {
+    cat << EOF
+                 _   _         
+                | | (_)        
+   ___     ___  | |  _   _ __  
+  / _ \   / __| | | | | | '_ \ 
+ | (_) | | (__  | | | | | |_) |
+  \___/   \___| |_| |_| | .__/ 
+                        | |    
+                        |_|   
+
+Usage: oclip [OPTION] [FILE]...
+Open clipboard in cloud.
+
+  -i      read text into oclip server from standard input or files (default)
+  -o      prints the oclip server to standard out (generally for piping
+          to a file or program)
+  -h      usage information
+
+Report bugs to <hanxi.info@gamil.com>
+EOF
+    exit 0
+}
+
+oclip_type=copy
+input_file='-'
+while getopts ":i:o" o; do
+    case "${o}" in
+        i)
+            input_file=${OPTARG}
+            ;;
+        o)
+            oclip_type=paste
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
+
+# install openssl for encrytion
+# apt-get install openssl
+# yum install openssl
+
+sha256code=$(echo -n "$passwd" | openssl sha256 -hex -r | cut -b -64)
+key=$(echo -n "$sha256code" | cut -b -32)
+iv=$(echo -n "$sha256code" | cut -b 33-)
+if [ $oclip_type == "copy" ]; then
+    cat -- $input_file | openssl enc -e -aes-128-cbc -nosalt -K $key -iv $iv | curl  -H "Authorization: token $token" -X POST --data-binary @- https://$domain/clip
+else
+    curl -s -H "Authorization: token $token" https://$domain/clip | openssl enc -d -aes-128-cbc -nosalt -K $key -iv $iv | sed 's/\r//g'
+fi
+
